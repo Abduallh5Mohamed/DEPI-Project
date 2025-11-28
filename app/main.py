@@ -8,9 +8,7 @@ from scipy import stats
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
-from sklearn.linear_model import LinearRegression
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
+# ML model training/loading removed - page removed
 import os
 from styles import get_custom_css, card_component
 
@@ -100,99 +98,8 @@ def load_data():
         return pd.DataFrame()
 
 
-@st.cache_resource
-def load_models():
-    """Load ML models if available, or train them from CSV data."""
-    models = {}
-    
-    reg_path = 'models/score_predictor.pkl'
-    clf_path = 'models/performance_classifier.pkl'
-    
-    # Try to load existing models
-    try:
-        if os.path.exists(reg_path) and os.path.exists(clf_path):
-            with open(reg_path, 'rb') as f:
-                models['reg'] = pickle.load(f)
-            with open(clf_path, 'rb') as f:
-                models['clf'] = pickle.load(f)
-            return models
-    except Exception:
-        pass
-    
-    # Models not found - train them from CSV
-    try:
-        csv_path = os.path.join('data', 'raw_student_data.csv')
-        if not os.path.exists(csv_path):
-            return models
-        
-        df = pd.read_csv(csv_path)
-        
-        # Rename columns to match expected format
-        df = df.rename(columns={
-            'attendance': 'total_attendance',
-            'final_score': 'total_mark'
-        })
-        
-        # Ensure numeric
-        for col in ['exam_1', 'exam_2', 'exam_3', 'total_attendance', 'total_mark']:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-        
-        # Generate gender_code (random but consistent)
-        np.random.seed(42)
-        df['gender_code'] = np.random.choice([0, 1], size=len(df))
-        
-        # --- Model 1: Regression (Predict Total Mark) ---
-        X_reg = df[['total_attendance', 'exam_1', 'exam_2']].dropna()
-        y_reg = df.loc[X_reg.index, 'total_mark']
-        
-        if len(X_reg) > 10:
-            X_train_r, X_test_r, y_train_r, y_test_r = train_test_split(X_reg, y_reg, test_size=0.2, random_state=42)
-            reg_model = LinearRegression()
-            reg_model.fit(X_train_r, y_train_r)
-            models['reg'] = reg_model
-        
-        # --- Model 2: Classification (Predict Performance Group) ---
-        def categorize(score):
-            if score < 70:
-                return 'Low'
-            elif score < 85:
-                return 'Medium'
-            else:
-                return 'High'
-        
-        df['performance_group'] = df['total_mark'].apply(categorize)
-        
-        X_clf = df[['total_attendance', 'gender_code', 'exam_1']].dropna()
-        y_clf = df.loc[X_clf.index, 'performance_group']
-        
-        if len(X_clf) > 10:
-            X_train_c, X_test_c, y_train_c, y_test_c = train_test_split(X_clf, y_clf, test_size=0.2, random_state=42)
-            clf_model = RandomForestClassifier(n_estimators=50, random_state=42, n_jobs=-1)
-            clf_model.fit(X_train_c, y_train_c)
-            models['clf'] = clf_model
-        
-        # Try to save models (may fail on read-only filesystem like Streamlit Cloud)
-        try:
-            os.makedirs('models', exist_ok=True)
-            if 'reg' in models:
-                with open(reg_path, 'wb') as f:
-                    pickle.dump(models['reg'], f)
-            if 'clf' in models:
-                with open(clf_path, 'wb') as f:
-                    pickle.dump(models['clf'], f)
-        except Exception:
-            pass  # Can't save on Streamlit Cloud, but models are in memory
-        
-    except Exception:
-        pass
-    
-    return models
-
-
-# Load data and models
+# Load data
 df = load_data()
-models = load_models()
 
 # Sidebar Navigation
 st.sidebar.title("🎯 Navigation")
@@ -203,7 +110,6 @@ page = st.sidebar.radio("Go to", [
     "🔮 Predictive Analytics",
     "🎯 Risk Analysis",
     "🏆 Performance Benchmarking",
-    "🤖 ML Insights", 
     "📄 Raw Data"
 ])
 page = page.split(" ", 1)[1]  # Remove emoji from page name
@@ -808,108 +714,7 @@ elif page == "Performance Benchmarking":
     st.plotly_chart(fig_class, use_container_width=True)
 
 
-# ============== PAGE: ML INSIGHTS ==============
-elif page == "ML Insights":
-    st.title("🤖 Machine Learning Insights")
-    
-    st.markdown("""
-    <div style="background: white; padding: 28px; border-radius: 12px; border: 2px solid #e2e8f0; margin-bottom: 24px;">
-        <h3 style="color: #0f172a; margin-top: 0; font-weight: 800;">🎯 Predict Student Performance</h3>
-        <p style="color: #64748b; font-size: 0.95rem; margin-bottom: 0;">
-            Enter student details to predict their final score using trained ML models.
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    if 'reg' not in models or 'clf' not in models:
-        st.warning("⚠️ ML models are not available. Prediction features are disabled.")
-        st.info("""
-        **To enable predictions:**
-        1. Run the training script locally: `python models/train_model.py`
-        2. Push the model files (`*.pkl`) to your repository
-        3. Redeploy the application
-        """)
-
-        # Diagnostics: show whether model files are present in the deployed filesystem
-        with st.expander("🧪 Model Diagnostic (developer)"):
-            try:
-                reg_exists = os.path.exists('models/score_predictor.pkl')
-                clf_exists = os.path.exists('models/performance_classifier.pkl')
-                st.write("score_predictor.pkl exists:", reg_exists)
-                if reg_exists:
-                    try:
-                        st.write("score_predictor.pkl size:", os.path.getsize('models/score_predictor.pkl'))
-                    except Exception as _:
-                        st.write("Could not read size for score_predictor.pkl")
-                st.write("performance_classifier.pkl exists:", clf_exists)
-                if clf_exists:
-                    try:
-                        st.write("performance_classifier.pkl size:", os.path.getsize('models/performance_classifier.pkl'))
-                    except Exception as _:
-                        st.write("Could not read size for performance_classifier.pkl")
-
-                st.write("Loaded model keys (in-memory):", list(models.keys()))
-            except Exception as e:
-                st.write("Diagnostics failed:", str(e))
-
-        # Demo mode
-        st.markdown("### 📊 Demo Analysis")
-        st.markdown("""
-        When models are available, you can:
-        - 🎯 **Predict scores** based on attendance and exam performance
-        - 📈 **Classify students** into performance categories (High/Medium/Low)
-        - 🔮 **Get early warnings** for at-risk students
-        """)
-
-        # Show basic statistics instead
-        st.markdown("### 📈 Current Data Insights")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Average Score", f"{filtered_df['total_mark'].mean():.1f}")
-        with col2:
-            st.metric("Average Attendance", f"{filtered_df['total_attendance'].mean():.1f}/10")
-        with col3:
-            pass_rate = (filtered_df['total_mark'] >= 50).mean() * 100
-            st.metric("Pass Rate", f"{pass_rate:.1f}%")
-    else:
-        st.markdown("### 🎯 Score Prediction")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("#### 📝 Input Features")
-            attendance = st.slider("Attendance (0-10)", 0, 10, 8)
-            exam1 = st.number_input("Exam 1 Score", 0.0, 100.0, 75.0, step=1.0)
-            exam2 = st.number_input("Exam 2 Score", 0.0, 100.0, 75.0, step=1.0)
-            gender = st.selectbox("Gender", ["Male", "Female"])
-            
-        with col2:
-            st.markdown("#### 🎯 Prediction Results")
-            if st.button("🚀 Predict Performance"):
-                try:
-                    # Regression prediction
-                    input_reg = pd.DataFrame([[attendance, exam1, exam2]], 
-                                            columns=['total_attendance', 'exam_1', 'exam_2'])
-                    pred_score = models['reg'].predict(input_reg)[0]
-                    
-                    # Classification prediction
-                    gender_code = 0 if gender == 'Male' else 1
-                    input_clf = pd.DataFrame([[attendance, gender_code, exam1]], 
-                                            columns=['total_attendance', 'gender_code', 'exam_1'])
-                    pred_group = models['clf'].predict(input_clf)[0]
-                    
-                    st.success(f"**Predicted Score:** {pred_score:.2f}")
-                    
-                    category_colors = {
-                        'High': '#22c55e',
-                        'Medium': '#f59e0b',
-                        'Low': '#ef4444'
-                    }
-                    color = category_colors.get(pred_group, '#6b7280')
-                    st.markdown(f"**Performance Category:** <span style='color:{color}; font-weight:bold;'>{pred_group}</span>", unsafe_allow_html=True)
-                    
-                except Exception as e:
-                    st.error(f"Prediction failed: {str(e)}")
+# ML Insights page removed by request
 
 
 # ============== PAGE: RAW DATA ==============
