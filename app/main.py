@@ -28,28 +28,54 @@ DB_PATH = 'student_performance.db'
 
 @st.cache_data
 def load_data():
-    conn = sqlite3.connect(DB_PATH)
-    query = """
-    SELECT 
-        sc.score_id,
-        st.first_name || ' ' || st.last_name as student_name,
-        st.gender,
-        st.class,
-        s.subject_name,
-        t.first_name || ' ' || t.last_name as teacher_name,
-        sc.exam_1,
-        sc.exam_2,
-        sc.exam_3,
-        sc.total_attendance,
-        sc.total_mark
-    FROM scores sc
-    JOIN students st ON sc.student_id = st.student_id
-    JOIN subjects s ON sc.subject_id = s.subject_id
-    JOIN teachers t ON sc.teacher_id = t.teacher_id
-    """
-    df = pd.read_sql_query(query, conn)
-    conn.close()
-    return df
+    # Try to load from SQLite database first. If DB is missing on the deployment
+    # platform (e.g. Streamlit Cloud) fallback to the CSV in `data/raw_student_data.csv`.
+    import os
+    try:
+        if os.path.exists(DB_PATH):
+            conn = sqlite3.connect(DB_PATH)
+            query = """
+            SELECT 
+                sc.score_id,
+                st.first_name || ' ' || st.last_name as student_name,
+                st.gender,
+                st.class,
+                s.subject_name,
+                t.first_name || ' ' || t.last_name as teacher_name,
+                sc.exam_1,
+                sc.exam_2,
+                sc.exam_3,
+                sc.total_attendance,
+                sc.total_mark,
+                sc.exam_date
+            FROM scores sc
+            JOIN students st ON sc.student_id = st.student_id
+            JOIN subjects s ON sc.subject_id = s.subject_id
+            JOIN teachers t ON sc.teacher_id = t.teacher_id
+            """
+            df = pd.read_sql_query(query, conn)
+            conn.close()
+            if df is not None and not df.empty:
+                return df
+            # If DB exists but returned empty, fall through to CSV fallback
+        # If DB file doesn't exist or failed to load, fallback to CSV
+        csv_path = os.path.join('data', 'raw_student_data.csv')
+        if os.path.exists(csv_path):
+            st.warning('Database not found or empty. Falling back to CSV data (data/raw_student_data.csv).')
+            df = pd.read_csv(csv_path)
+            return df
+        else:
+            st.error('No data source available: neither database nor CSV found.')
+            return pd.DataFrame()
+    except Exception as e:
+        # Catch unexpected DB/IO errors and fallback to CSV if present
+        st.warning(f'Data load failed ({e}). Trying CSV fallback...')
+        csv_path = os.path.join('data', 'raw_student_data.csv')
+        if os.path.exists(csv_path):
+            df = pd.read_csv(csv_path)
+            return df
+        st.error('Critical: failed to load data from database and CSV fallback not found.')
+        return pd.DataFrame()
 
 @st.cache_resource
 def load_models():
