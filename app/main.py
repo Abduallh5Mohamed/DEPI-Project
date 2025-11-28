@@ -10,6 +10,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 import os
+from db_utils import create_db_from_csv
 from styles import get_custom_css, card_component
 
 # Configuration
@@ -28,28 +29,68 @@ DB_PATH = 'student_performance.db'
 
 @st.cache_data
 def load_data():
-    conn = sqlite3.connect(DB_PATH)
-    query = """
-    SELECT 
-        sc.score_id,
-        st.first_name || ' ' || st.last_name as student_name,
-        st.gender,
-        st.class,
-        s.subject_name,
-        t.first_name || ' ' || t.last_name as teacher_name,
-        sc.exam_1,
-        sc.exam_2,
-        sc.exam_3,
-        sc.total_attendance,
-        sc.total_mark
-    FROM scores sc
-    JOIN students st ON sc.student_id = st.student_id
-    JOIN subjects s ON sc.subject_id = s.subject_id
-    JOIN teachers t ON sc.teacher_id = t.teacher_id
-    """
-    df = pd.read_sql_query(query, conn)
-    conn.close()
-    return df
+    import traceback
+    from pathlib import Path
+    # Try to load from SQLite database first. If DB is missing on the deployment
+    # platform (e.g. Streamlit Cloud) fallback to the CSV in `data/raw_student_data.csv`.
+    try:
+        if os.path.exists(DB_PATH):
+            conn = sqlite3.connect(DB_PATH)
+            query = """
+            SELECT 
+                sc.score_id,
+                st.first_name || ' ' || st.last_name as student_name,
+                st.gender,
+                st.class,
+                s.subject_name,
+                t.first_name || ' ' || t.last_name as teacher_name,
+                sc.exam_1,
+                sc.exam_2,
+                sc.exam_3,
+                sc.total_attendance,
+                sc.total_mark,
+                sc.exam_date
+            FROM scores sc
+            JOIN students st ON sc.student_id = st.student_id
+            JOIN subjects s ON sc.subject_id = s.subject_id
+            JOIN teachers t ON sc.teacher_id = t.teacher_id
+            """
+            try:
+                df = pd.read_sql_query(query, conn)
+            except Exception:
+                # write detailed traceback to logs/db_errors.log for inspection
+                log_dir = Path('logs')
+                log_dir.mkdir(exist_ok=True)
+                log_file = log_dir / 'db_errors.log'
+                with open(log_file, 'a', encoding='utf-8') as f:
+                    f.write('\n--- DB LOAD ERROR ---\n')
+                    f.write(traceback.format_exc())
+                conn.close()
+                st.warning('Database read failed — falling back to CSV. Details written to logs/db_errors.log')
+                df = None
+            else:
+                conn.close()
+                if df is not None and not df.empty:
+                    return df
+        # CSV fallback
+        csv_path = os.path.join('data', 'raw_student_data.csv')
+        if os.path.exists(csv_path):
+            st.info('Loading data from CSV fallback (data/raw_student_data.csv).')
+            df = pd.read_csv(csv_path)
+            return df
+        else:
+            st.error('No data source available: neither database nor CSV found.')
+            return pd.DataFrame()
+    except Exception:
+        # Last-resort catch-all: write traceback and surface friendly message
+        log_dir = Path('logs')
+        log_dir.mkdir(exist_ok=True)
+        log_file = log_dir / 'db_errors.log'
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write('\n--- UNEXPECTED LOAD ERROR ---\n')
+            f.write(traceback.format_exc())
+        st.error('Unexpected error while loading data. Details written to logs/db_errors.log')
+        return pd.DataFrame()
 
 @st.cache_resource
 def load_models():
@@ -62,6 +103,15 @@ def load_models():
     except FileNotFoundError:
         st.error("Models not found. Please run training script first.")
     return models
+
+# Allow creating a local SQLite DB from CSV via the sidebar before loading data
+if st.sidebar.button("🛠️ Initialize DB from CSV (create local SQLite)"):
+    success, msg = create_db_from_csv()
+    if success:
+        st.success(msg + " — restarting app to load database...")
+        st.experimental_rerun()
+    else:
+        st.error("Failed to create DB: " + str(msg))
 
 df = load_data()
 models = load_models()
