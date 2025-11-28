@@ -65,9 +65,8 @@ env/
 .DS_Store
 Thumbs.db
 
-# Database and trained models (do NOT commit heavy files)
+# Database (do NOT commit)
 student_performance.db
-models/*.pkl
 
 # Secrets / env
 .env
