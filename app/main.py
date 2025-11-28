@@ -132,8 +132,24 @@ page = page.split(" ", 1)[1]  # Remove emoji from page name
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🔍 Filters")
-selected_subject = st.sidebar.multiselect("📚 Select Subject", df['subject_name'].unique(), default=df['subject_name'].unique())
-selected_class = st.sidebar.multiselect("🎓 Select Class", df['class'].unique(), default=df['class'].unique())
+# Validate that data is loaded and contains expected columns
+required_cols = {'subject_name', 'class', 'total_mark', 'total_attendance', 'student_name'}
+missing_cols = required_cols.difference(set(df.columns)) if not df.empty else required_cols
+if df is None or df.empty or missing_cols:
+    st.sidebar.error("Data is not available or missing required columns: " + ", ".join(sorted(missing_cols)))
+    st.sidebar.caption("Use the button below to create a local SQLite DB from the included CSV, or push a DB to the repo.")
+    if st.sidebar.button("🛠️ Initialize DB from CSV (create local SQLite)"):
+        success, msg = create_db_from_csv()
+        if success:
+            st.sidebar.success(msg + " — restarting app...")
+            st.experimental_rerun()
+        else:
+            st.sidebar.error("Failed to create DB: " + str(msg))
+    st.stop()
+
+# Safe filters (only executed when df has expected columns)
+selected_subject = st.sidebar.multiselect("📚 Select Subject", sorted(df['subject_name'].unique()), default=sorted(df['subject_name'].unique()))
+selected_class = st.sidebar.multiselect("🎓 Select Class", sorted(df['class'].unique()), default=sorted(df['class'].unique()))
 
 # Filter Data
 filtered_df = df[df['subject_name'].isin(selected_subject) & df['class'].isin(selected_class)]
