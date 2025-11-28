@@ -10,6 +10,8 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 import os
+import traceback
+from pathlib import Path
 from styles import get_custom_css, card_component
 
 # Configuration
@@ -53,28 +55,41 @@ def load_data():
             JOIN subjects s ON sc.subject_id = s.subject_id
             JOIN teachers t ON sc.teacher_id = t.teacher_id
             """
-            df = pd.read_sql_query(query, conn)
-            conn.close()
-            if df is not None and not df.empty:
-                return df
-            # If DB exists but returned empty, fall through to CSV fallback
-        # If DB file doesn't exist or failed to load, fallback to CSV
+            try:
+                df = pd.read_sql_query(query, conn)
+            except Exception as db_exc:
+                # log exception to file for inspection (cloud logs redact DB details)
+                log_dir = Path('logs')
+                log_dir.mkdir(exist_ok=True)
+                log_file = log_dir / 'db_errors.log'
+                with open(log_file, 'a', encoding='utf-8') as f:
+                    f.write('\n--- DB LOAD ERROR ---\n')
+                    f.write(traceback.format_exc())
+                conn.close()
+                st.warning('Database read failed — falling back to CSV. Details written to logs/db_errors.log')
+                df = None
+            else:
+                conn.close()
+                if df is not None and not df.empty:
+                    return df
+        # CSV fallback
         csv_path = os.path.join('data', 'raw_student_data.csv')
         if os.path.exists(csv_path):
-            st.warning('Database not found or empty. Falling back to CSV data (data/raw_student_data.csv).')
+            st.info('Loading data from CSV fallback (data/raw_student_data.csv).')
             df = pd.read_csv(csv_path)
             return df
         else:
             st.error('No data source available: neither database nor CSV found.')
             return pd.DataFrame()
-    except Exception as e:
-        # Catch unexpected DB/IO errors and fallback to CSV if present
-        st.warning(f'Data load failed ({e}). Trying CSV fallback...')
-        csv_path = os.path.join('data', 'raw_student_data.csv')
-        if os.path.exists(csv_path):
-            df = pd.read_csv(csv_path)
-            return df
-        st.error('Critical: failed to load data from database and CSV fallback not found.')
+    except Exception:
+        # Last-resort catch-all: write traceback and surface friendly message
+        log_dir = Path('logs')
+        log_dir.mkdir(exist_ok=True)
+        log_file = log_dir / 'db_errors.log'
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write('\n--- UNEXPECTED LOAD ERROR ---\n')
+            f.write(traceback.format_exc())
+        st.error('Unexpected error while loading data. Details written to logs/db_errors.log')
         return pd.DataFrame()
 
 @st.cache_resource
@@ -88,6 +103,30 @@ def load_models():
     except FileNotFoundError:
         st.error("Models not found. Please run training script first.")
     return models
+
+
+def create_db_from_csv(db_path='student_performance.db', csv_path='data/raw_student_data.csv'):
+    """Create a simple SQLite database from the provided CSV file.
+    This is intended for deployments where a local SQLite DB is acceptable
+    (e.g. quick demo on Streamlit Cloud). It writes a 'scores' table.
+    """
+    try:
+        if not os.path.exists(csv_path):
+            return False, f'CSV not found: {csv_path}'
+        df_csv = pd.read_csv(csv_path)
+        conn = sqlite3.connect(db_path)
+        df_csv.to_sql('scores', conn, if_exists='replace', index=False)
+        conn.close()
+        return True, 'Database created from CSV.'
+    except Exception as e:
+        # write to logs and return error
+        log_dir = Path('logs')
+        log_dir.mkdir(exist_ok=True)
+        log_file = log_dir / 'db_errors.log'
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write('\n--- CREATE DB ERROR ---\n')
+            f.write(traceback.format_exc())
+        return False, str(e)
 
 df = load_data()
 models = load_models()
