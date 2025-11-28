@@ -122,9 +122,6 @@ def load_models():
     except Exception:
         models_available = False
     
-    if not models_available:
-        st.sidebar.warning("⚠️ ML models not found. Prediction features disabled.")
-    
     return models
 
 
