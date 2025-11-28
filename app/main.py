@@ -8,6 +8,9 @@ from scipy import stats
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
+from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
 import os
 from styles import get_custom_css, card_component
 
@@ -99,28 +102,90 @@ def load_data():
 
 @st.cache_resource
 def load_models():
-    """Load ML models if available, return empty dict with warning if not found."""
+    """Load ML models if available, or train them from CSV data."""
     models = {}
-    models_available = True
     
+    reg_path = 'models/score_predictor.pkl'
+    clf_path = 'models/performance_classifier.pkl'
+    
+    # Try to load existing models
     try:
-        reg_path = 'models/score_predictor.pkl'
-        clf_path = 'models/performance_classifier.pkl'
-        
-        if os.path.exists(reg_path):
+        if os.path.exists(reg_path) and os.path.exists(clf_path):
             with open(reg_path, 'rb') as f:
                 models['reg'] = pickle.load(f)
-        else:
-            models_available = False
-            
-        if os.path.exists(clf_path):
             with open(clf_path, 'rb') as f:
                 models['clf'] = pickle.load(f)
-        else:
-            models_available = False
-            
+            return models
     except Exception:
-        models_available = False
+        pass
+    
+    # Models not found - train them from CSV
+    try:
+        csv_path = os.path.join('data', 'raw_student_data.csv')
+        if not os.path.exists(csv_path):
+            return models
+        
+        df = pd.read_csv(csv_path)
+        
+        # Rename columns to match expected format
+        df = df.rename(columns={
+            'attendance': 'total_attendance',
+            'final_score': 'total_mark'
+        })
+        
+        # Ensure numeric
+        for col in ['exam_1', 'exam_2', 'exam_3', 'total_attendance', 'total_mark']:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        
+        # Generate gender_code (random but consistent)
+        np.random.seed(42)
+        df['gender_code'] = np.random.choice([0, 1], size=len(df))
+        
+        # --- Model 1: Regression (Predict Total Mark) ---
+        X_reg = df[['total_attendance', 'exam_1', 'exam_2']].dropna()
+        y_reg = df.loc[X_reg.index, 'total_mark']
+        
+        if len(X_reg) > 10:
+            X_train_r, X_test_r, y_train_r, y_test_r = train_test_split(X_reg, y_reg, test_size=0.2, random_state=42)
+            reg_model = LinearRegression()
+            reg_model.fit(X_train_r, y_train_r)
+            models['reg'] = reg_model
+        
+        # --- Model 2: Classification (Predict Performance Group) ---
+        def categorize(score):
+            if score < 70:
+                return 'Low'
+            elif score < 85:
+                return 'Medium'
+            else:
+                return 'High'
+        
+        df['performance_group'] = df['total_mark'].apply(categorize)
+        
+        X_clf = df[['total_attendance', 'gender_code', 'exam_1']].dropna()
+        y_clf = df.loc[X_clf.index, 'performance_group']
+        
+        if len(X_clf) > 10:
+            X_train_c, X_test_c, y_train_c, y_test_c = train_test_split(X_clf, y_clf, test_size=0.2, random_state=42)
+            clf_model = RandomForestClassifier(n_estimators=50, random_state=42, n_jobs=-1)
+            clf_model.fit(X_train_c, y_train_c)
+            models['clf'] = clf_model
+        
+        # Try to save models (may fail on read-only filesystem like Streamlit Cloud)
+        try:
+            os.makedirs('models', exist_ok=True)
+            if 'reg' in models:
+                with open(reg_path, 'wb') as f:
+                    pickle.dump(models['reg'], f)
+            if 'clf' in models:
+                with open(clf_path, 'wb') as f:
+                    pickle.dump(models['clf'], f)
+        except Exception:
+            pass  # Can't save on Streamlit Cloud, but models are in memory
+        
+    except Exception:
+        pass
     
     return models
 
