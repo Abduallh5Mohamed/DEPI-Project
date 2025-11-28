@@ -829,7 +829,29 @@ elif page == "ML Insights":
         2. Push the model files (`*.pkl`) to your repository
         3. Redeploy the application
         """)
-        
+
+        # Diagnostics: show whether model files are present in the deployed filesystem
+        with st.expander("🧪 Model Diagnostic (developer)"):
+            try:
+                reg_exists = os.path.exists('models/score_predictor.pkl')
+                clf_exists = os.path.exists('models/performance_classifier.pkl')
+                st.write("score_predictor.pkl exists:", reg_exists)
+                if reg_exists:
+                    try:
+                        st.write("score_predictor.pkl size:", os.path.getsize('models/score_predictor.pkl'))
+                    except Exception as _:
+                        st.write("Could not read size for score_predictor.pkl")
+                st.write("performance_classifier.pkl exists:", clf_exists)
+                if clf_exists:
+                    try:
+                        st.write("performance_classifier.pkl size:", os.path.getsize('models/performance_classifier.pkl'))
+                    except Exception as _:
+                        st.write("Could not read size for performance_classifier.pkl")
+
+                st.write("Loaded model keys (in-memory):", list(models.keys()))
+            except Exception as e:
+                st.write("Diagnostics failed:", str(e))
+
         # Demo mode
         st.markdown("### 📊 Demo Analysis")
         st.markdown("""
@@ -838,7 +860,7 @@ elif page == "ML Insights":
         - 📈 **Classify students** into performance categories (High/Medium/Low)
         - 🔮 **Get early warnings** for at-risk students
         """)
-        
+
         # Show basic statistics instead
         st.markdown("### 📈 Current Data Insights")
         col1, col2, col3 = st.columns(3)
